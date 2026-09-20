@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Build output
+/dist
+/build
+
+# Drizzle migrations (keep schema, ignore generated sql if preferred)
+drizzle/*.sql
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Seed data (optional — remove this line if you want CSVs tracked)
+seed/questions/
+
+# EAS / Expo build
+.eas/
+eas.json
