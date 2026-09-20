@@ -97,7 +97,7 @@ edicurve/
 ### 1. Clone & install
 
 ```bash
-git clone https://github.com/your-username/edicurve.git
+git clone https://github.com/Smartex-Dan/edicurve.git
 cd edicurve
 pnpm install
 ```
