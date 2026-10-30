@@ -1,11 +1,32 @@
 // server/connectors.ts
-import { eq, and } from "drizzle-orm";
-import { db } from "./db";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 import { connectorTokens } from "../drizzle/schema";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 const NOTION_TOKEN_URL = "https://api.notion.com/v1/oauth/token";
+
+async function requireDb() {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  return db;
+}
+
+async function findToken(userId: number, provider: "google" | "notion") {
+  const db = await requireDb();
+  const [token] = await db
+    .select()
+    .from(connectorTokens)
+    .where(
+      and(
+        eq(connectorTokens.userId, userId),
+        eq(connectorTokens.provider, provider),
+      ),
+    )
+    .limit(1);
+  return token;
+}
 
 // ─── Google ───────────────────────────────────────────────────────────────────
 
@@ -50,12 +71,15 @@ export async function exchangeGoogleCode(
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Google token exchange failed: ${err}`);
+    throw new Error(`Google token exchange failed: ${await res.text()}`);
   }
 
   const data = await res.json();
+  const expiresAt = data.expires_in
+    ? new Date(Date.now() + data.expires_in * 1000)
+    : null;
 
+  const db = await requireDb();
   await db
     .insert(connectorTokens)
     .values({
@@ -63,35 +87,21 @@ export async function exchangeGoogleCode(
       provider: "google",
       accessToken: data.access_token,
       refreshToken: data.refresh_token ?? null,
-      expiresAt: data.expires_in
-        ? new Date(Date.now() + data.expires_in * 1000)
-        : null,
+      expiresAt,
       scope: data.scope ?? null,
     })
     .onDuplicateKeyUpdate({
       set: {
         accessToken: data.access_token,
-        refreshToken: data.refresh_token ?? null,
-        expiresAt: data.expires_in
-          ? new Date(Date.now() + data.expires_in * 1000)
-          : null,
+        ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
+        expiresAt,
         scope: data.scope ?? null,
       },
     });
 }
 
 export async function refreshGoogleToken(userId: number): Promise<string> {
-  const [token] = await db
-    .select()
-    .from(connectorTokens)
-    .where(
-      and(
-        eq(connectorTokens.userId, userId),
-        eq(connectorTokens.provider, "google"),
-      ),
-    )
-    .limit(1);
-
+  const token = await findToken(userId, "google");
   if (!token?.refreshToken) throw new Error("No Google refresh token stored");
 
   const res = await fetch(GOOGLE_TOKEN_URL, {
@@ -108,6 +118,7 @@ export async function refreshGoogleToken(userId: number): Promise<string> {
   if (!res.ok) throw new Error("Google token refresh failed");
   const data = await res.json();
 
+  const db = await requireDb();
   await db
     .update(connectorTokens)
     .set({
@@ -125,17 +136,7 @@ export async function refreshGoogleToken(userId: number): Promise<string> {
 }
 
 export async function getValidGoogleToken(userId: number): Promise<string> {
-  const [token] = await db
-    .select()
-    .from(connectorTokens)
-    .where(
-      and(
-        eq(connectorTokens.userId, userId),
-        eq(connectorTokens.provider, "google"),
-      ),
-    )
-    .limit(1);
-
+  const token = await findToken(userId, "google");
   if (!token) throw new Error("Google not connected");
 
   const isExpired =
@@ -179,12 +180,12 @@ export async function exchangeNotionCode(
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Notion token exchange failed: ${err}`);
+    throw new Error(`Notion token exchange failed: ${await res.text()}`);
   }
 
   const data = await res.json();
 
+  const db = await requireDb();
   await db
     .insert(connectorTokens)
     .values({
@@ -195,23 +196,11 @@ export async function exchangeNotionCode(
       expiresAt: null,
       scope: null,
     })
-    .onDuplicateKeyUpdate({
-      set: { accessToken: data.access_token },
-    });
+    .onDuplicateKeyUpdate({ set: { accessToken: data.access_token } });
 }
 
 export async function getNotionToken(userId: number): Promise<string> {
-  const [token] = await db
-    .select()
-    .from(connectorTokens)
-    .where(
-      and(
-        eq(connectorTokens.userId, userId),
-        eq(connectorTokens.provider, "notion"),
-      ),
-    )
-    .limit(1);
-
+  const token = await findToken(userId, "notion");
   if (!token) throw new Error("Notion not connected");
   return token.accessToken;
 }
@@ -223,17 +212,7 @@ export async function disconnectProvider(
   provider: "google" | "notion",
 ): Promise<void> {
   if (provider === "google") {
-    const [token] = await db
-      .select()
-      .from(connectorTokens)
-      .where(
-        and(
-          eq(connectorTokens.userId, userId),
-          eq(connectorTokens.provider, "google"),
-        ),
-      )
-      .limit(1);
-
+    const token = await findToken(userId, "google");
     if (token?.accessToken) {
       await fetch(`${GOOGLE_REVOKE_URL}?token=${token.accessToken}`, {
         method: "POST",
@@ -241,6 +220,7 @@ export async function disconnectProvider(
     }
   }
 
+  const db = await requireDb();
   await db
     .delete(connectorTokens)
     .where(
@@ -254,6 +234,7 @@ export async function disconnectProvider(
 export async function getConnectorStatus(
   userId: number,
 ): Promise<{ google: boolean; notion: boolean }> {
+  const db = await requireDb();
   const tokens = await db
     .select({ provider: connectorTokens.provider })
     .from(connectorTokens)

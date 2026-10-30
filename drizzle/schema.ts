@@ -4,6 +4,7 @@ import {
   mysqlEnum,
   mysqlTable,
   text,
+  unique,
   timestamp,
   varchar,
 } from "drizzle-orm/mysql-core";
@@ -128,17 +129,21 @@ export const bookmarks = mysqlTable("bookmarks", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-export const connectorTokens = mysqlTable("connectorTokens", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  provider: mysqlEnum("provider", ["google", "notion"]).notNull(),
-  accessToken: text("accessToken").notNull(),
-  refreshToken: text("refreshToken"),
-  expiresAt: timestamp("expiresAt"),
-  scope: text("scope"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+export const connectorTokens = mysqlTable(
+  "connectorTokens",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    provider: mysqlEnum("provider", ["google", "notion"]).notNull(),
+    accessToken: text("accessToken").notNull(),
+    refreshToken: text("refreshToken"),
+    expiresAt: timestamp("expiresAt"),
+    scope: text("scope"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [unique("user_provider_unique").on(t.userId, t.provider)],
+);
 
 export type ConnectorToken = typeof connectorTokens.$inferSelect;
 export type InsertConnectorToken = typeof connectorTokens.$inferInsert;

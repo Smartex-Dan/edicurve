@@ -5,13 +5,14 @@ import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { useOnboarding } from "@/lib/onboarding-context";
 import { getPushToken } from "@/lib/notifications";
+import { openOAuthFlow } from "@/lib/connectors";
 import { trpc } from "@/lib/trpc";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 
 function getInitials(name?: string | null): string {
-  if (!name) return "S";
+  if (!name) return "E";
   return name
     .trim()
     .split(/\s+/)
@@ -21,12 +22,49 @@ function getInitials(name?: string | null): string {
     .join("");
 }
 
+const CONNECTORS = [
+  {
+    id: "google" as const,
+    label: "Google",
+    caption: "Calendar · Drive · Classroom",
+    icon: "person.crop.circle.fill" as const,
+    color: "#4285F4",
+  },
+  {
+    id: "notion" as const,
+    label: "Notion",
+    caption: "Notes & pages",
+    icon: "doc.text.fill" as const,
+    color: "#555555",
+  },
+];
+
 export default function ProfileScreen() {
   const router = useRouter();
   const colors = useColors();
   const { user, isAuthenticated, logout } = useAuth();
   const { data: onboarding } = useOnboarding();
   const registerToken = trpc.notifications.registerToken.useMutation();
+
+  // ── Connected apps (hooks live up here, never inside JSX) ──────────────────
+  const connectorStatus = trpc.connectors.status.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const googleAuthUrl = trpc.connectors.googleAuthUrl.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const notionAuthUrl = trpc.connectors.notionAuthUrl.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const googleCallback = trpc.connectors.googleCallback.useMutation({
+    onSuccess: () => connectorStatus.refetch(),
+  });
+  const notionCallback = trpc.connectors.notionCallback.useMutation({
+    onSuccess: () => connectorStatus.refetch(),
+  });
+  const disconnect = trpc.connectors.disconnect.useMutation({
+    onSuccess: () => connectorStatus.refetch(),
+  });
 
   const displayName = user?.name || "Student";
   const initials = getInitials(user?.name);
@@ -56,6 +94,41 @@ export default function ProfileScreen() {
         "Your device permission is ready. Sign in to connect reminders to your Edicurve account.",
       );
     }
+  };
+
+  const handleConnect = async (provider: "google" | "notion") => {
+    const url =
+      provider === "google" ? googleAuthUrl.data?.url : notionAuthUrl.data?.url;
+    if (!url) return;
+
+    const code = await openOAuthFlow(
+      url,
+      provider === "google"
+        ? "/oauth/google/callback"
+        : "/oauth/notion/callback",
+    );
+    if (!code) return;
+
+    if (provider === "google") {
+      await googleCallback.mutateAsync({ code });
+    } else {
+      await notionCallback.mutateAsync({ code });
+    }
+  };
+
+  const handleDisconnect = (provider: "google" | "notion") => {
+    Alert.alert(
+      `Disconnect ${provider === "google" ? "Google" : "Notion"}?`,
+      "Edicurve will lose access to your data from this service.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Disconnect",
+          style: "destructive",
+          onPress: () => disconnect.mutate({ provider }),
+        },
+      ],
+    );
   };
 
   return (
@@ -140,7 +213,7 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {/* Quick links */}
+        {/* Study tools */}
         <Text className="mt-8 text-xl font-bold text-foreground">
           Study tools
         </Text>
@@ -167,7 +240,9 @@ export default function ProfileScreen() {
               <Text className="ml-3 flex-1 font-semibold text-foreground">
                 Planner
               </Text>
-              <Text className="mr-1 text-xs text-muted">Tasks & reminders</Text>
+              <Text className="mr-1 text-xs text-muted">
+                Tasks & reminders
+              </Text>
               <IconSymbol name="chevron.right" size={18} color={colors.muted} />
             </View>
           </Pressable>
@@ -175,7 +250,7 @@ export default function ProfileScreen() {
             onPress={() =>
               Alert.alert(
                 "Analytics",
-                "Weak topic analysis coming soon. Complete a few mock exams first to generate insights.",
+                "Weak topic analysis is coming soon. Complete a few mock exams first to generate insights.",
               )
             }
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
@@ -189,7 +264,7 @@ export default function ProfileScreen() {
               <Text className="ml-3 flex-1 font-semibold text-foreground">
                 Analytics
               </Text>
-              <Text className="mr-1 text-xs text-primary font-bold">
+              <Text className="mr-1 text-xs font-bold text-primary">
                 Coming soon
               </Text>
               <IconSymbol name="chevron.right" size={18} color={colors.muted} />
@@ -197,79 +272,75 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-                // ── Connected apps ────────────────────────────────────────────────────────────
-        const connectorStatus = trpc.connectors.status.useQuery(undefined, {
-          enabled: isAuthenticated,
-        });
-        const googleAuthUrl = trpc.connectors.googleAuthUrl.useQuery(undefined, {
-          enabled: isAuthenticated,
-        });
-        const notionAuthUrl = trpc.connectors.notionAuthUrl.useQuery(undefined, {
-          enabled: isAuthenticated,
-        });
-        const googleCallback = trpc.connectors.googleCallback.useMutation({
-          onSuccess: () => connectorStatus.refetch(),
-        });
-        const notionCallback = trpc.connectors.notionCallback.useMutation({
-          onSuccess: () => connectorStatus.refetch(),
-        });
-        const disconnect = trpc.connectors.disconnect.useMutation({
-          onSuccess: () => connectorStatus.refetch(),
-        });
-
-        const handleConnect = async (provider: "google" | "notion") => {
-          const url =
-            provider === "google"
-              ? googleAuthUrl.data?.url
-              : notionAuthUrl.data?.url;
-
-          if (!url) return;
-
-          const code = await openOAuthFlow(
-            url,
-            provider === "google" ? "/oauth/google/callback" : "/oauth/notion/callback",
-          );
-
-          if (!code) return;
-
-          if (provider === "google") {
-            await googleCallback.mutateAsync({ code });
-          } else {
-            await notionCallback.mutateAsync({ code });
-          }
-        };
-
-        const handleDisconnect = (provider: "google" | "notion") => {
-          Alert.alert(
-            `Disconnect ${provider === "google" ? "Google" : "Notion"}?`,
-            "Edicurve will lose access to your data from this service.",
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Disconnect",
-                style: "destructive",
-                onPress: () => disconnect.mutate({ provider }),
-              },
-            ],
-          );
-        };
-
-        const CONNECTORS = [
-          {
-            id: "google" as const,
-            label: "Google",
-            caption: "Calendar · Drive · Classroom",
-            icon: "person.crop.circle.fill" as const,
-            color: "#4285F4",
-          },
-          {
-            id: "notion" as const,
-            label: "Notion",
-            caption: "Notes & pages",
-            icon: "doc.text.fill" as const,
-            color: "#000000",
-          },
-        ];
+        {/* Connected apps */}
+        {isAuthenticated && (
+          <>
+            <Text className="mt-8 text-xl font-bold text-foreground">
+              Connected apps
+            </Text>
+            <Text className="mt-1 text-sm text-muted">
+              Let EDI see your calendar, files, and notes to give smarter help.
+            </Text>
+            <View className="mt-4 overflow-hidden rounded-2xl border border-border bg-surface">
+              {CONNECTORS.map((connector, index) => {
+                const connected = connectorStatus.data?.[connector.id] ?? false;
+                const isLast = index === CONNECTORS.length - 1;
+                return (
+                  <View
+                    key={connector.id}
+                    className={`flex-row items-center p-4 ${
+                      !isLast ? "border-b border-border" : ""
+                    }`}
+                  >
+                    <View
+                      className="h-10 w-10 items-center justify-center rounded-xl"
+                      style={{ backgroundColor: `${connector.color}18` }}
+                    >
+                      <IconSymbol
+                        name={connector.icon}
+                        size={20}
+                        color={connector.color}
+                      />
+                    </View>
+                    <View className="ml-3 flex-1">
+                      <Text className="font-bold text-foreground">
+                        {connector.label}
+                      </Text>
+                      <Text className="mt-0.5 text-xs text-muted">
+                        {connector.caption}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() =>
+                        connected
+                          ? handleDisconnect(connector.id)
+                          : handleConnect(connector.id)
+                      }
+                      disabled={disconnect.isPending}
+                      style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+                    >
+                      <View
+                        className={`rounded-full px-3 py-1.5 ${
+                          connected
+                            ? "border border-border bg-surface"
+                            : "bg-primary"
+                        }`}
+                      >
+                        <Text
+                          className={`text-xs font-bold ${
+                            connected ? "text-muted" : "text-background"
+                          }`}
+                        >
+                          {connected ? "Disconnect" : "Connect"}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         {/* Preferences */}
         <Text className="mt-8 text-xl font-bold text-foreground">
@@ -304,10 +375,7 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             onPress={() =>
-              Alert.alert(
-                "About Edicurve",
-                "Your all-in-one study companion. Study smarter, not harder.",
-              )
+              Alert.alert("About Edicurve", "Learn, Practice, Progress.")
             }
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
           >

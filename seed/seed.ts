@@ -1,30 +1,45 @@
 // seed/seed.ts
 // Run with: npx tsx seed/seed.ts
 
-import { drizzle } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
+import "dotenv/config";
 import * as fs from "fs";
 import * as path from "path";
+import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 import { parse } from "csv-parse/sync";
+import { and, eq } from "drizzle-orm";
 import { subjects, topics, questions } from "../drizzle/schema";
-import { eq, and } from "drizzle-orm";
-import "dotenv/config";
 
-const SUBJECTS_META: Record<string, { color: string; icon: string }> = {
-  Mathematics:      { color: "#7668D9", icon: "function" },
-  English:          { color: "#D89034", icon: "edit-note" },
-  Physics:          { color: "#0F6B54", icon: "science" },
-  Chemistry:        { color: "#C0392B", icon: "biotech" },
-  Biology:          { color: "#27AE60", icon: "eco" },
-  Economics:        { color: "#2980B9", icon: "trending-up" },
-  Government:       { color: "#8E44AD", icon: "account-balance" },
-  Literature:       { color: "#E67E22", icon: "menu-book" },
-  Geography:        { color: "#16A085", icon: "public" },
-  History:          { color: "#795548", icon: "history-edu" },
-  "Further Maths":  { color: "#5C6BC0", icon: "calculate" },
-  "Computer Science": { color: "#0288D1", icon: "computer" },
-  Accounting:       { color: "#00897B", icon: "receipt-long" },
-  French:           { color: "#E91E63", icon: "translate" },
+type CsvRow = {
+  subject?: string;
+  topic: string;
+  question: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct: string;
+  explanation: string;
+  year?: string;
+  source?: string;
+  difficulty?: string;
+};
+
+const SUBJECT_COLORS: Record<string, string> = {
+  Mathematics: "#7668D9",
+  English: "#D89034",
+  Physics: "#0F6B54",
+  Chemistry: "#C0392B",
+  Biology: "#27AE60",
+  Economics: "#2980B9",
+  Government: "#8E44AD",
+  Literature: "#E67E22",
+  Geography: "#16A085",
+  History: "#795548",
+  "Further Maths": "#5C6BC0",
+  "Computer Science": "#0288D1",
+  Accounting: "#00897B",
+  French: "#E91E63",
 };
 
 async function main() {
@@ -39,19 +54,19 @@ async function main() {
   const files = fs.readdirSync(csvDir).filter((f) => f.endsWith(".csv"));
 
   if (files.length === 0) {
-    console.log("No CSV files found in seed/questions/. Add your CSVs and re-run.");
-    process.exit(0);
+    console.log("No CSV files found in seed/questions/. Add some and re-run.");
+    await connection.end();
+    return;
   }
 
   for (const file of files) {
     const subjectName = path.basename(file, ".csv");
-    const meta = SUBJECTS_META[subjectName] ?? { color: "#0F6B54", icon: "book.fill" };
+    const color = SUBJECT_COLORS[subjectName] ?? "#0F6B54";
 
-    // upsert subject
     await db
       .insert(subjects)
-      .values({ name: subjectName, color: meta.color, icon: meta.icon })
-      .onDuplicateKeyUpdate({ set: { color: meta.color, icon: meta.icon } });
+      .values({ name: subjectName, color, icon: "book.fill" })
+      .onDuplicateKeyUpdate({ set: { color } });
 
     const [subject] = await db
       .select()
@@ -59,32 +74,54 @@ async function main() {
       .where(eq(subjects.name, subjectName))
       .limit(1);
 
-    console.log(`\n📚 Subject: ${subjectName} (id: ${subject.id})`);
+    console.log(`\nSubject: ${subjectName} (id ${subject.id})`);
 
     const raw = fs.readFileSync(path.join(csvDir, file), "utf-8");
-    const rows = parse(raw, { columns: true, skip_empty_lines: true, trim: true });
+    const rows = parse(raw, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    }) as CsvRow[];
+
+    let inserted = 0;
+    let skipped = 0;
 
     for (const row of rows) {
-      // upsert topic
-      const existing = await db
+      const existingTopic = await db
         .select()
         .from(topics)
-        .where(and(eq(topics.subjectId, subject.id), eq(topics.name, row.topic)))
+        .where(
+          and(eq(topics.subjectId, subject.id), eq(topics.name, row.topic)),
+        )
         .limit(1);
 
       let topicId: number;
-
-      if (existing.length > 0) {
-        topicId = existing[0].id;
+      if (existingTopic.length > 0) {
+        topicId = existingTopic[0].id;
       } else {
         const result = await db
           .insert(topics)
           .values({ subjectId: subject.id, name: row.topic });
         topicId = Number(result[0].insertId);
-        console.log(`  ↳ New topic: ${row.topic}`);
+        console.log(`  New topic: ${row.topic}`);
       }
 
-      // insert question
+      const duplicate = await db
+        .select({ id: questions.id })
+        .from(questions)
+        .where(
+          and(
+            eq(questions.subjectId, subject.id),
+            eq(questions.body, row.question),
+          ),
+        )
+        .limit(1);
+
+      if (duplicate.length > 0) {
+        skipped++;
+        continue;
+      }
+
       await db.insert(questions).values({
         subjectId: subject.id,
         topicId,
@@ -95,16 +132,18 @@ async function main() {
         optionD: row.option_d,
         correctOption: row.correct.toUpperCase() as "A" | "B" | "C" | "D",
         explanation: row.explanation,
-        year: row.year ? parseInt(row.year) : null,
+        year: row.year ? parseInt(row.year, 10) : null,
         source: row.source || "JAMB",
-        difficulty: (row.difficulty as "easy" | "medium" | "hard") || "medium",
+        difficulty:
+          (row.difficulty as "easy" | "medium" | "hard") || "medium",
       });
+      inserted++;
     }
 
-    console.log(`  ✓ ${rows.length} questions inserted for ${subjectName}`);
+    console.log(`  Done: ${inserted} inserted, ${skipped} already existed`);
   }
 
-  console.log("\n✅ Seed complete.");
+  console.log("\nSeed complete.");
   await connection.end();
 }
 
