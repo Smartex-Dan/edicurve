@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { startOAuthLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
+import { useStudyStats } from "@/hooks/use-study-stats";
 import { useOnboarding } from "@/lib/onboarding-context";
 import { getPushToken } from "@/lib/notifications";
 import { openOAuthFlow } from "@/lib/connectors";
@@ -11,8 +12,11 @@ import { trpc } from "@/lib/trpc";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 
+// Flip to true once Edicurve has its own sign-in.
+const SIGN_IN_ENABLED = false;
+
 function getInitials(name?: string | null): string {
-  if (!name) return "E";
+  if (!name) return "";
   return name
     .trim()
     .split(/\s+/)
@@ -44,9 +48,9 @@ export default function ProfileScreen() {
   const colors = useColors();
   const { user, isAuthenticated, logout } = useAuth();
   const { data: onboarding } = useOnboarding();
+  const { stats } = useStudyStats();
   const registerToken = trpc.notifications.registerToken.useMutation();
 
-  // ── Connected apps (hooks live up here, never inside JSX) ──────────────────
   const connectorStatus = trpc.connectors.status.useQuery(undefined, {
     enabled: isAuthenticated,
   });
@@ -90,8 +94,8 @@ export default function ProfileScreen() {
       );
     } else {
       Alert.alert(
-        "Sign in to sync reminders",
-        "Your device permission is ready. Sign in to connect reminders to your Edicurve account.",
+        "Reminders ready on this device",
+        "Your device permission is set. Study reminders run from this device.",
       );
     }
   };
@@ -139,23 +143,29 @@ export default function ProfileScreen() {
       >
         <Text className="text-3xl font-bold text-foreground">Profile</Text>
 
-        {/* Avatar + name */}
         <View className="mt-8 items-center">
           <View className="h-20 w-20 items-center justify-center rounded-full bg-primary">
-            <Text className="text-2xl font-bold text-background">
-              {initials}
-            </Text>
+            {initials ? (
+              <Text className="text-2xl font-bold text-background">
+                {initials}
+              </Text>
+            ) : (
+              <IconSymbol
+                name="person.crop.circle.fill"
+                size={40}
+                color={colors.background}
+              />
+            )}
           </View>
           <Text className="mt-4 text-2xl font-bold text-foreground">
             {displayName}
           </Text>
           <Text className="mt-1 text-sm text-muted">
-            {user?.email || "Student workspace"}
+            {user?.email || "Study workspace"}
           </Text>
         </View>
 
-        {/* Sign in CTA */}
-        {!isAuthenticated && (
+        {SIGN_IN_ENABLED && !isAuthenticated && (
           <Pressable
             onPress={signIn}
             style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
@@ -173,23 +183,27 @@ export default function ProfileScreen() {
           </Pressable>
         )}
 
-        {/* Stats */}
         <View className="mt-7 flex-row gap-3">
           <View className="flex-1 rounded-2xl border border-border bg-surface p-4">
-            <Text className="text-2xl font-bold text-foreground">12</Text>
+            <Text className="text-2xl font-bold text-foreground">
+              {stats.streak}
+            </Text>
             <Text className="mt-1 text-xs text-muted">Day streak</Text>
           </View>
           <View className="flex-1 rounded-2xl border border-border bg-surface p-4">
-            <Text className="text-2xl font-bold text-foreground">68%</Text>
+            <Text className="text-2xl font-bold text-foreground">
+              {stats.weeklyPercent}%
+            </Text>
             <Text className="mt-1 text-xs text-muted">Weekly goal</Text>
           </View>
           <View className="flex-1 rounded-2xl border border-border bg-surface p-4">
-            <Text className="text-2xl font-bold text-foreground">27</Text>
-            <Text className="mt-1 text-xs text-muted">Sessions</Text>
+            <Text className="text-2xl font-bold text-foreground">
+              {stats.totalAnswered}
+            </Text>
+            <Text className="mt-1 text-xs text-muted">Questions</Text>
           </View>
         </View>
 
-        {/* Learning setup */}
         <Text className="mt-8 text-xl font-bold text-foreground">
           Your learning setup
         </Text>
@@ -213,11 +227,31 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        {/* Study tools */}
         <Text className="mt-8 text-xl font-bold text-foreground">
           Study tools
         </Text>
         <View className="mt-4 overflow-hidden rounded-2xl border border-border bg-surface">
+          <Pressable
+            onPress={() => router.push("/analytics" as never)}
+            style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
+          >
+            <View className="flex-row items-center border-b border-border p-4">
+              <IconSymbol
+                name="chart.bar.fill"
+                size={20}
+                color={colors.muted}
+              />
+              <Text className="ml-3 flex-1 font-semibold text-foreground">
+                Analytics
+              </Text>
+              <Text className="mr-1 text-xs text-muted">
+                {stats.weakTopics.length > 0
+                  ? `${stats.weakTopics.length} weak topic${stats.weakTopics.length === 1 ? "" : "s"}`
+                  : "Progress & weak topics"}
+              </Text>
+              <IconSymbol name="chevron.right" size={18} color={colors.muted} />
+            </View>
+          </Pressable>
           <Pressable
             onPress={() => router.push("/library" as never)}
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
@@ -235,7 +269,7 @@ export default function ProfileScreen() {
             onPress={() => router.push("/planner" as never)}
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
           >
-            <View className="flex-row items-center border-b border-border p-4">
+            <View className="flex-row items-center p-4">
               <IconSymbol name="calendar" size={20} color={colors.muted} />
               <Text className="ml-3 flex-1 font-semibold text-foreground">
                 Planner
@@ -246,33 +280,8 @@ export default function ProfileScreen() {
               <IconSymbol name="chevron.right" size={18} color={colors.muted} />
             </View>
           </Pressable>
-          <Pressable
-            onPress={() =>
-              Alert.alert(
-                "Analytics",
-                "Weak topic analysis is coming soon. Complete a few mock exams first to generate insights.",
-              )
-            }
-            style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
-          >
-            <View className="flex-row items-center p-4">
-              <IconSymbol
-                name="chart.bar.fill"
-                size={20}
-                color={colors.muted}
-              />
-              <Text className="ml-3 flex-1 font-semibold text-foreground">
-                Analytics
-              </Text>
-              <Text className="mr-1 text-xs font-bold text-primary">
-                Coming soon
-              </Text>
-              <IconSymbol name="chevron.right" size={18} color={colors.muted} />
-            </View>
-          </Pressable>
         </View>
 
-        {/* Connected apps */}
         {isAuthenticated && (
           <>
             <Text className="mt-8 text-xl font-bold text-foreground">
@@ -342,7 +351,6 @@ export default function ProfileScreen() {
           </>
         )}
 
-        {/* Preferences */}
         <Text className="mt-8 text-xl font-bold text-foreground">
           Preferences
         </Text>

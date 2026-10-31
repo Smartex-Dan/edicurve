@@ -2,38 +2,47 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { TopicCard } from "@/components/topic-card";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useStudyStats } from "@/hooks/use-study-stats";
 import { useColors } from "@/hooks/use-colors";
 import { useOnboarding } from "@/lib/onboarding-context";
+import { MIN_ATTEMPTS, subjectColor } from "@/lib/study-stats";
 
-const SUBJECT_COLORS: Record<string, string> = {
-  Mathematics: "#7668D9",
-  English: "#D89034",
-  Physics: "#0F6B54",
-  Chemistry: "#C0392B",
-  Biology: "#27AE60",
-  Economics: "#2980B9",
-  Government: "#8E44AD",
-  Literature: "#E67E22",
-  Geography: "#16A085",
-  History: "#795548",
-  "Further Maths": "#5C6BC0",
-  "Computer Science": "#0288D1",
-  Accounting: "#00897B",
-  French: "#E91E63",
-};
+// Keep in sync with app/exam-session.tsx
+const PER_SUBJECT = 20;
+const SECONDS_PER_QUESTION = 40;
 
-const WEAK_TOPICS_PLACEHOLDER = [
-  { subject: "Physics", topic: "Mechanics", score: 42 },
-  { subject: "Chemistry", topic: "Moles & Titration", score: 38 },
-  { subject: "Mathematics", topic: "Logarithms", score: 55 },
-];
+function durationLabel(questionCount: number) {
+  const minutes = Math.ceil((questionCount * SECONDS_PER_QUESTION) / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return `${(minutes / 60).toFixed(1).replace(".0", "")} hrs`;
+}
 
 export default function ExamScreen() {
   const colors = useColors();
   const router = useRouter();
   const { data: onboarding } = useOnboarding();
+  const { stats } = useStudyStats();
   const subjects = onboarding.subjects ?? [];
+
+  const startExam = (subjectList: string[]) =>
+    router.push({
+      pathname: "/exam-session",
+      params: {
+        subjects: subjectList.join(","),
+        perSubject: String(PER_SUBJECT),
+      },
+    } as never);
+
+  const startPractice = (subject: string, topic?: string) =>
+    router.push({
+      pathname: "/practice",
+      params: topic ? { subject, topic } : { subject },
+    } as never);
+
+  const fullCount = subjects.length * PER_SUBJECT;
+  const shownWeak = stats.weakTopics.slice(0, 3);
 
   return (
     <ScreenContainer className="px-5 pt-5" edges={["top", "left", "right"]}>
@@ -50,16 +59,14 @@ export default function ExamScreen() {
           where you need more work.
         </Text>
 
-        {/* Start exam options */}
         <Text className="mt-8 text-xl font-bold text-foreground">
           Start an exam
         </Text>
-        <Text className="mt-1 text-sm text-muted">
-          Question bank coming once your CSVs are seeded.
-        </Text>
 
-        {/* Full simulation card */}
-        <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+        <Pressable
+          onPress={() => subjects.length > 0 && startExam(subjects)}
+          style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
+        >
           <View className="mt-4 rounded-3xl bg-primary p-5">
             <View className="flex-row items-center justify-between">
               <View className="h-12 w-12 items-center justify-center rounded-2xl bg-[#2D8D72]">
@@ -77,41 +84,43 @@ export default function ExamScreen() {
             <Text className="mt-1 text-sm leading-5 text-[#C6F2E2]">
               All your subjects · timed · auto-scored
             </Text>
-            <View className="mt-4 flex-row gap-4">
-              {[
-                {
-                  label: "Questions",
-                  value: subjects.length > 0 ? `${subjects.length * 20}` : "—",
-                },
-                { label: "Duration", value: "3 hrs" },
-                { label: "Subjects", value: `${subjects.length || "—"}` },
-              ].map((stat) => (
-                <View key={stat.label}>
-                  <Text className="text-lg font-bold text-white">
-                    {stat.value}
-                  </Text>
-                  <Text className="text-xs text-[#A8DCC9]">{stat.label}</Text>
-                </View>
-              ))}
+            <View className="mt-4 flex-row gap-6">
+              <View>
+                <Text className="text-lg font-bold text-white">
+                  {subjects.length > 0 ? fullCount : "-"}
+                </Text>
+                <Text className="text-xs text-[#A8DCC9]">Questions</Text>
+              </View>
+              <View>
+                <Text className="text-lg font-bold text-white">
+                  {subjects.length > 0 ? durationLabel(fullCount) : "-"}
+                </Text>
+                <Text className="text-xs text-[#A8DCC9]">Duration</Text>
+              </View>
+              <View>
+                <Text className="text-lg font-bold text-white">
+                  {subjects.length || "-"}
+                </Text>
+                <Text className="text-xs text-[#A8DCC9]">Subjects</Text>
+              </View>
             </View>
           </View>
         </Pressable>
 
-        {/* Per-subject practice */}
         {subjects.length > 0 && (
           <>
             <Text className="mt-8 text-xl font-bold text-foreground">
-              Practice by subject
+              By subject
             </Text>
             <View className="mt-4 gap-3">
               {subjects.map((subject) => {
-                const color = SUBJECT_COLORS[subject] ?? "#0F6B54";
+                const color = subjectColor(subject);
                 return (
-                  <Pressable
+                  <View
                     key={subject}
-                    style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+                    className="rounded-2xl border border-border bg-surface p-4"
                   >
-                    <View className="flex-row items-center rounded-2xl border border-border bg-surface p-4">
+                    <View className="flex-row items-center">
                       <View
                         className="h-11 w-11 items-center justify-center rounded-xl"
                         style={{ backgroundColor: `${color}19` }}
@@ -123,19 +132,40 @@ export default function ExamScreen() {
                           {subject}
                         </Text>
                         <Text className="mt-1 text-xs text-muted">
-                          20 questions · 30 min
-                        </Text>
-                      </View>
-                      <View
-                        className="rounded-full px-3 py-1.5"
-                        style={{ backgroundColor: `${color}19` }}
-                      >
-                        <Text className="text-xs font-bold" style={{ color }}>
-                          Start
+                          {PER_SUBJECT} questions · {durationLabel(PER_SUBJECT)}
                         </Text>
                       </View>
                     </View>
-                  </Pressable>
+                    <View className="mt-3 flex-row gap-2">
+                      <Pressable
+                        onPress={() => startPractice(subject)}
+                        style={({ pressed }) => [
+                          { opacity: pressed ? 0.7 : 1, flex: 1 },
+                        ]}
+                      >
+                        <View className="items-center rounded-xl border border-border py-2.5">
+                          <Text className="text-xs font-bold text-muted">
+                            Practice
+                          </Text>
+                        </View>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => startExam([subject])}
+                        style={({ pressed }) => [
+                          { opacity: pressed ? 0.7 : 1, flex: 1 },
+                        ]}
+                      >
+                        <View
+                          className="items-center rounded-xl py-2.5"
+                          style={{ backgroundColor: `${color}19` }}
+                        >
+                          <Text className="text-xs font-bold" style={{ color }}>
+                            Timed exam
+                          </Text>
+                        </View>
+                      </Pressable>
+                    </View>
+                  </View>
                 );
               })}
             </View>
@@ -143,7 +173,7 @@ export default function ExamScreen() {
         )}
 
         {subjects.length === 0 && (
-          <View className="mt-6 rounded-2xl border border-border bg-surface p-5 items-center">
+          <View className="mt-6 items-center rounded-2xl border border-border bg-surface p-5">
             <IconSymbol name="doc.text.fill" size={28} color={colors.muted} />
             <Text className="mt-3 text-center font-semibold text-foreground">
               No subjects set
@@ -164,82 +194,42 @@ export default function ExamScreen() {
           </View>
         )}
 
-        {/* Weak topics */}
         <View className="mt-8 flex-row items-end justify-between">
           <View>
             <Text className="text-xl font-bold text-foreground">
               Weak topics
             </Text>
             <Text className="mt-1 text-sm text-muted">
-              Based on your exam history.
+              Based on your practice and exam history.
             </Text>
           </View>
-          <Text className="text-xs font-bold text-primary">See all</Text>
+          <Pressable
+            onPress={() => router.push("/analytics" as never)}
+            style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}
+          >
+            <Text className="text-sm font-bold text-primary">See all</Text>
+          </Pressable>
         </View>
 
-        <View className="mt-4 gap-3">
-          {WEAK_TOPICS_PLACEHOLDER.map((item) => {
-            const color = SUBJECT_COLORS[item.subject] ?? "#0F6B54";
-            const barColor =
-              item.score < 50
-                ? "#E74C3C"
-                : item.score < 65
-                  ? "#F2B84B"
-                  : "#27AE60";
-            return (
-              <View
-                key={`${item.subject}-${item.topic}`}
-                className="rounded-2xl border border-border bg-surface p-4"
-              >
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text className="font-bold text-foreground">
-                      {item.topic}
-                    </Text>
-                    <Text
-                      className="mt-0.5 text-xs font-semibold"
-                      style={{ color }}
-                    >
-                      {item.subject}
-                    </Text>
-                  </View>
-                  <Text
-                    className="text-lg font-bold"
-                    style={{ color: barColor }}
-                  >
-                    {item.score}%
-                  </Text>
-                </View>
-                <View className="mt-3 h-2 overflow-hidden rounded-full bg-[#E9E8E2]">
-                  <View
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${item.score}%`,
-                      backgroundColor: barColor,
-                    }}
-                  />
-                </View>
-                <Pressable
-                  onPress={() => router.push("/tutor" as never)}
-                  style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
-                >
-                  <Text className="mt-3 text-xs font-bold text-primary">
-                    Practice this topic with Edi →
-                  </Text>
-                </Pressable>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Placeholder note */}
-        <View className="mt-6 rounded-2xl bg-[#FFF8E7] border border-[#F2B84B33] p-4">
-          <Text className="text-xs font-bold text-[#B27B12]">COMING NEXT</Text>
-          <Text className="mt-1 text-sm leading-5 text-[#7A5A0A]">
-            Weak topic data will auto-populate once you complete mock exams. The
-            scores above are placeholders.
-          </Text>
-        </View>
+        {shownWeak.length > 0 ? (
+          <View className="mt-4 gap-3">
+            {shownWeak.map((topic) => (
+              <TopicCard
+                key={`${topic.subject}-${topic.topic}`}
+                topic={topic}
+                onPractice={() => startPractice(topic.subject, topic.topic)}
+              />
+            ))}
+          </View>
+        ) : (
+          <View className="mt-4 rounded-2xl border border-border bg-surface p-4">
+            <Text className="text-sm leading-5 text-muted">
+              {stats.hasData
+                ? `No weak topics yet. A topic shows up here once you have answered at least ${MIN_ATTEMPTS} questions in it and score under 70%.`
+                : "Finish a practice set or a mock exam and your weak topics will show up here."}
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </ScreenContainer>
   );

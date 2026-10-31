@@ -35,6 +35,25 @@ export function getApiBaseUrl(): string {
     return API_BASE_URL.replace(/\/$/, "");
   }
 
+  if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
+    const { protocol, hostname } = window.location;
+
+    // Local development: Metro is on 8081, the API is on 3000
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return `${protocol}//${hostname}:3000`;
+    }
+
+    // Hosted sandbox pattern: 8081-xxxx -> 3000-xxxx
+    const apiHostname = hostname.replace(/^8081-/, "3000-");
+    if (apiHostname !== hostname) {
+      return `${protocol}//${apiHostname}`;
+    }
+  }
+
+  // Fallback to empty (will use relative URL)
+  return "";
+
+
   // On web, derive from current hostname by replacing port 8081 with 3000
   if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
     const { protocol, hostname } = window.location;
@@ -47,7 +66,7 @@ export function getApiBaseUrl(): string {
 
   // Fallback to empty (will use relative URL)
   return "";
-}
+}  
 
 export const SESSION_TOKEN_KEY = "app_session_token";
 export const USER_INFO_KEY = "manus-runtime-user-info";

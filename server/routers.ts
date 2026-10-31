@@ -7,6 +7,12 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { storageGetSignedUrl, storagePut } from "./../server/storage";
 import {
+  buildExam,
+  getPracticeQuestions,
+  listBankSubjects,
+  listBankTopics,
+} from "./question-bank";
+import {
   buildGoogleAuthUrl,
   buildNotionAuthUrl,
   exchangeGoogleCode,
@@ -206,7 +212,7 @@ export const appRouter = router({
             {
               role: "system",
               content:
-                "You are Edi, a knowledgeable and patient AI study companion inside Edicurve. Help students at any level — secondary school through university — with clear explanations, practice questions, past paper walkthroughs, and study plans. Be concise, warm, and direct. Break hard problems into small steps. Ask one focused follow-up question when it helps. Never pretend to be human.",
+                "You are EDI, a knowledgeable and patient AI study companion inside Edicurve. Help students at any level — secondary school through university — with clear explanations, practice questions, past paper walkthroughs, and study plans. Be concise, warm, and direct. Break hard problems into small steps. Ask one focused follow-up question when it helps. Never pretend to be human.",
             },
             ...documentMessage,
             ...input.messages,
@@ -318,106 +324,135 @@ export const appRouter = router({
       ),
   }),
 
+  bank: router({
+    subjects: publicProcedure.query(() => listBankSubjects()),
+    topics: publicProcedure
+      .input(z.object({ subjectId: z.number().int().min(0) }))
+      .query(({ input }) => listBankTopics(input.subjectId)),
+    practice: publicProcedure
+      .input(
+        z.object({
+          subjectId: z.number().int().min(0),
+          topicId: z.number().int().positive().optional(),
+          limit: z.number().int().min(1).max(50).default(10),
+        }),
+      )
+      .query(({ input }) => getPracticeQuestions(input)),
+          buildExam: publicProcedure
+      .input(
+        z.object({
+          subjects: z.array(z.string().min(1).max(120)).min(1).max(8),
+          perSubject: z.number().int().min(1).max(60),
+        }),
+      )
+      .mutation(({ input }) =>
+        buildExam({
+          subjectNames: input.subjects,
+          perSubject: input.perSubject,
+        }),
+      ),
+  }),
+
   connectors: router({
-  status: protectedProcedure.query(async ({ ctx }) => {
-    return getConnectorStatus(ctx.user.id);
-  }),
-
-  googleAuthUrl: protectedProcedure.query(() => {
-    return { url: buildGoogleAuthUrl() };
-  }),
-
-  googleCallback: protectedProcedure
-    .input(z.object({ code: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await exchangeGoogleCode(input.code, ctx.user.id);
-      return { success: true };
+    status: protectedProcedure.query(async ({ ctx }) => {
+      return getConnectorStatus(ctx.user.id);
     }),
 
-  notionAuthUrl: protectedProcedure.query(() => {
-    return { url: buildNotionAuthUrl() };
-  }),
-
-  notionCallback: protectedProcedure
-    .input(z.object({ code: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await exchangeNotionCode(input.code, ctx.user.id);
-      return { success: true };
+    googleAuthUrl: protectedProcedure.query(() => {
+      return { url: buildGoogleAuthUrl() };
     }),
 
-  disconnect: protectedProcedure
-    .input(z.object({ provider: z.enum(["google", "notion"]) }))
-    .mutation(async ({ ctx, input }) => {
-      await disconnectProvider(ctx.user.id, input.provider);
-      return { success: true };
+    googleCallback: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        await exchangeGoogleCode(input.code, ctx.user.id);
+        return { success: true };
+      }),
+
+    notionAuthUrl: protectedProcedure.query(() => {
+      return { url: buildNotionAuthUrl() };
     }),
 
-  // ── Google Calendar ──────────────────────────────────────────────────
-  calendarEvents: protectedProcedure
-    .input(z.object({ days: z.number().int().min(1).max(30).default(7) }))
-    .query(async ({ ctx, input }) => {
-      const token = await getValidGoogleToken(ctx.user.id);
-      const now = new Date().toISOString();
-      const end = new Date(
-        Date.now() + input.days * 24 * 60 * 60 * 1000,
-      ).toISOString();
+    notionCallback: protectedProcedure
+      .input(z.object({ code: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        await exchangeNotionCode(input.code, ctx.user.id);
+        return { success: true };
+      }),
 
-      const res = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
-          new URLSearchParams({
-            timeMin: now,
-            timeMax: end,
-            singleEvents: "true",
-            orderBy: "startTime",
-            maxResults: "20",
-          }),
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+    disconnect: protectedProcedure
+      .input(z.object({ provider: z.enum(["google", "notion"]) }))
+      .mutation(async ({ ctx, input }) => {
+        await disconnectProvider(ctx.user.id, input.provider);
+        return { success: true };
+      }),
 
-      if (!res.ok) throw new Error("Failed to fetch calendar events");
-      const data = await res.json();
+    // ── Google Calendar ────────────────────────────────────────────────
+    calendarEvents: protectedProcedure
+      .input(z.object({ days: z.number().int().min(1).max(30).default(7) }))
+      .query(async ({ ctx, input }) => {
+        const token = await getValidGoogleToken(ctx.user.id);
+        const now = new Date().toISOString();
+        const end = new Date(
+          Date.now() + input.days * 24 * 60 * 60 * 1000,
+        ).toISOString();
 
-      return (data.items ?? []).map((event: any) => ({
-        id: event.id,
-        title: event.summary ?? "Untitled",
-        start: event.start?.dateTime ?? event.start?.date,
-        end: event.end?.dateTime ?? event.end?.date,
-        isAllDay: !event.start?.dateTime,
-        description: event.description ?? null,
-      }));
-    }),
+        const res = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+            new URLSearchParams({
+              timeMin: now,
+              timeMax: end,
+              singleEvents: "true",
+              orderBy: "startTime",
+              maxResults: "20",
+            }),
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
 
-  // ── Google Drive ─────────────────────────────────────────────────────
-  driveFiles: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(20).default(10) }))
-    .query(async ({ ctx, input }) => {
-      const token = await getValidGoogleToken(ctx.user.id);
+        if (!res.ok) throw new Error("Failed to fetch calendar events");
+        const data = await res.json();
 
-      const res = await fetch(
-        `https://www.googleapis.com/drive/v3/files?` +
-          new URLSearchParams({
-            q: "mimeType='application/pdf' or mimeType contains 'document'",
-            fields: "files(id,name,mimeType,modifiedTime,webViewLink,size)",
-            orderBy: "modifiedTime desc",
-            pageSize: String(input.limit),
-          }),
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+        return (data.items ?? []).map((event: any) => ({
+          id: event.id,
+          title: event.summary ?? "Untitled",
+          start: event.start?.dateTime ?? event.start?.date,
+          end: event.end?.dateTime ?? event.end?.date,
+          isAllDay: !event.start?.dateTime,
+          description: event.description ?? null,
+        }));
+      }),
 
-      if (!res.ok) throw new Error("Failed to fetch Drive files");
-      const data = await res.json();
+    // ── Google Drive ───────────────────────────────────────────────────
+    driveFiles: protectedProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(20).default(10) }))
+      .query(async ({ ctx, input }) => {
+        const token = await getValidGoogleToken(ctx.user.id);
 
-      return (data.files ?? []).map((file: any) => ({
-        id: file.id,
-        name: file.name,
-        mimeType: file.mimeType,
-        modifiedTime: file.modifiedTime,
-        webViewLink: file.webViewLink,
-        size: file.size ? parseInt(file.size) : null,
-      }));
-    }),
+        const res = await fetch(
+          `https://www.googleapis.com/drive/v3/files?` +
+            new URLSearchParams({
+              q: "mimeType='application/pdf' or mimeType contains 'document'",
+              fields: "files(id,name,mimeType,modifiedTime,webViewLink,size)",
+              orderBy: "modifiedTime desc",
+              pageSize: String(input.limit),
+            }),
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
 
-    // ── Google Classroom ─────────────────────────────────────────────────
+        if (!res.ok) throw new Error("Failed to fetch Drive files");
+        const data = await res.json();
+
+        return (data.files ?? []).map((file: any) => ({
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType,
+          modifiedTime: file.modifiedTime,
+          webViewLink: file.webViewLink,
+          size: file.size ? parseInt(file.size) : null,
+        }));
+      }),
+
+    // ── Google Classroom ───────────────────────────────────────────────
     classroomCourses: protectedProcedure.query(async ({ ctx }) => {
       const token = await getValidGoogleToken(ctx.user.id);
 
@@ -458,7 +493,7 @@ export const appRouter = router({
       return withWork;
     }),
 
-    // ── Notion ───────────────────────────────────────────────────────────
+    // ── Notion ─────────────────────────────────────────────────────────
     notionPages: protectedProcedure
       .input(z.object({ limit: z.number().int().min(1).max(20).default(10) }))
       .query(async ({ ctx, input }) => {
@@ -491,7 +526,7 @@ export const appRouter = router({
           lastEdited: page.last_edited_time,
         }));
       }),
-  }), 
+  }),
 });
 
 export type AppRouter = typeof appRouter;

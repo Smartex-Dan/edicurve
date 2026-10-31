@@ -41,7 +41,3 @@ yarn-debug.log*
 
 # Seed data (optional — remove this line if you want CSVs tracked)
 seed/questions/
-
-# EAS / Expo build
-.eas/
-eas.json
