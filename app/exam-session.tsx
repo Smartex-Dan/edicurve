@@ -105,7 +105,7 @@ export default function ExamSessionScreen() {
         setQuestions(data as ExamQuestion[]);
         setPhase("intro");
       }
-      } catch (error) {
+    } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unknown error");
     }
   };
@@ -232,9 +232,9 @@ export default function ExamSessionScreen() {
           The question bank has nothing for these subjects yet. Add CSV files to
           seed/questions (named exactly like the subjects) and run the seed
           script.
-          { loadError ? (
-          <Text className="mt-3 text-sm text-muted">Error: {loadError}</Text>
-        ) : null }
+          {loadError ? (
+            <Text className="mt-3 text-sm text-muted">Error: {loadError}</Text>
+          ) : null}
         </Text>
       </ScreenContainer>
     );
@@ -448,11 +448,17 @@ export default function ExamSessionScreen() {
             {formatTime(remaining)}
           </Text>
         </View>
-        <Pressable
-          onPress={() => setConfirm("submit")}
-          style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}
-        >
-          <Text className="text-sm font-bold text-primary">Submit</Text>
+        <Pressable onPress={() => setConfirm("submit")} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]} >
+          <View className="flex-row items-center rounded-full bg-primary px-4 py-2">
+            <IconSymbol
+              name="checkmark.circle.fill"
+              size={15}
+              color={colors.background}
+            />
+            <Text className="ml-1.5 text-sm font-bold text-background">
+              Submit
+            </Text>
+          </View>
         </Pressable>
       </View>
 
@@ -666,6 +672,7 @@ export default function ExamSessionScreen() {
                   </Text>
                 </View>
               </Pressable>
+
               <Pressable
                 onPress={() =>
                   setIndex((i) => Math.min(questions.length - 1, i + 1))
@@ -686,6 +693,32 @@ export default function ExamSessionScreen() {
                 </View>
               </Pressable>
             </View>
+
+            <Pressable
+              onPress={() => setConfirm("submit")}
+              style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
+            >
+              <View
+                className="mt-5 flex-row items-center justify-center rounded-2xl py-4"
+                style={{
+                  backgroundColor:
+                    answeredCount === questions.length
+                      ? "#27AE60"
+                      : colors.primary,
+                }}
+              >
+                <IconSymbol
+                  name="checkmark.circle.fill"
+                  size={20}
+                  color="#FFFFFF"
+                />
+                <Text className="ml-2 text-base font-bold text-white">
+                  {answeredCount === questions.length
+                    ? "All answered - Submit exam"
+                    : "Submit exam"}
+                </Text>
+              </View>
+            </Pressable>
           </>
         )}
       </ScrollView>

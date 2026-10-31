@@ -16,6 +16,7 @@ const MAPPING = {
   "bubble.left.and.bubble.right.fill": "forum",
   "person.crop.circle.fill": "account-circle",
   "paperplane.fill": "send",
+  "person.fill": "person",
   "plus": "add",
   "checkmark.circle.fill": "check-circle",
   "clock.fill": "schedule",

@@ -9,7 +9,7 @@ export type OnboardingData = {
   completed: boolean;
 };
 
-const STORAGE_KEY = "learning-hub-onboarding-v1";
+const STORAGE_KEY = "edicurve-onboarding-v1";
 const DEFAULT_DATA: OnboardingData = { goal: "", subjects: [], minutesPerDay: 30, studyDays: ["Mon", "Wed", "Fri"], completed: false };
 
 type OnboardingContextValue = {
