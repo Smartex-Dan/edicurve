@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { useStudyStats } from "@/hooks/use-study-stats";
 import { useOnboarding } from "@/lib/onboarding-context";
+import { useLocalProfile } from "@/lib/profile-store";
 
 const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -64,10 +65,12 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { data: onboarding } = useOnboarding();
   const { stats } = useStudyStats();
+  const profile = useLocalProfile();
 
   const greeting = getGreeting();
-  const firstName = user?.name?.split(" ")[0];
-  const initials = getInitials(user?.name);
+  const displayName = profile.profile.name || user?.name || "";
+  const firstName = displayName.split(" ")[0];
+  const initials = getInitials(displayName);
   const nextDay = nextStudyDay(onboarding.studyDays ?? []);
 
   const streakText = `${stats.streak} ${stats.streak === 1 ? "day" : "days"}`;

@@ -1,6 +1,6 @@
 /** @type {const} */
 const themeColors = {
-  primary: { light: '#0F6B54', dark: '#64D5AE' },
+  primary: { light: '#0B7A6B', dark: '#3CCDB5' },
   background: { light: '#F7F4EE', dark: '#10231E' },
   surface: { light: '#FFFFFF', dark: '#183029' },
   foreground: { light: '#12251F', dark: '#F1F7F2' },
@@ -11,4 +11,4 @@ const themeColors = {
   error: { light: '#F6D3C9', dark: '#63372E' },
 };
 
-module.exports = { themeColors };
+module.exports = { themeColors }

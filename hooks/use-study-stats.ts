@@ -13,6 +13,10 @@ export function useStudyStats() {
   const { data: onboarding } = useOnboarding();
   const [history, setHistory] = useState<StudyHistory | null>(null);
 
+  const reload = useCallback(async () => {
+    setHistory(await loadStudyHistory());
+  }, []);
+
   // Reload every time the screen comes into focus so new results show up.
   useFocusEffect(
     useCallback(() => {
@@ -32,5 +36,10 @@ export function useStudyStats() {
     [history, goalDays],
   );
 
-  return { stats, loaded: history !== null };
+  return {
+    stats,
+    history: history ?? EMPTY_HISTORY,
+    loaded: history !== null,
+    reload,
+  };
 }

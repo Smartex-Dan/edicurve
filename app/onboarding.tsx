@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -125,9 +125,11 @@ export default function OnboardingScreen() {
         {/* Header */}
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center">
-            <View className="h-10 w-10 items-center justify-center rounded-2xl bg-primary">
-              <IconSymbol name="sparkles" size={20} color={colors.background} />
-            </View>
+            <Image
+              source={require("../assets/images/logo.png")}
+              style={{ width: 44, height: 36 }}
+              resizeMode="contain"
+            />
             <Text className="ml-3 text-lg font-bold text-foreground">
               Edicurve
             </Text>
@@ -166,16 +168,14 @@ export default function OnboardingScreen() {
                     style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
                   >
                     <View
-                      className={`flex-row items-center rounded-2xl border p-4 ${
-                        selected
+                      className={`flex-row items-center rounded-2xl border p-4 ${selected
                           ? "border-primary bg-[#EAF5F0]"
                           : "border-border bg-surface"
-                      }`}
+                        }`}
                     >
                       <View
-                        className={`mr-3 h-5 w-5 items-center justify-center rounded-full border-2 ${
-                          selected ? "border-primary bg-primary" : "border-border"
-                        }`}
+                        className={`mr-3 h-5 w-5 items-center justify-center rounded-full border-2 ${selected ? "border-primary bg-primary" : "border-border"
+                          }`}
                       >
                         {selected && (
                           <IconSymbol
@@ -186,9 +186,8 @@ export default function OnboardingScreen() {
                         )}
                       </View>
                       <Text
-                        className={`flex-1 text-sm font-semibold ${
-                          selected ? "text-primary" : "text-foreground"
-                        }`}
+                        className={`flex-1 text-sm font-semibold ${selected ? "text-primary" : "text-foreground"
+                          }`}
                       >
                         {item}
                       </Text>
@@ -223,16 +222,14 @@ export default function OnboardingScreen() {
                     style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
                   >
                     <View
-                      className={`rounded-full border px-4 py-3 ${
-                        selected
+                      className={`rounded-full border px-4 py-3 ${selected
                           ? "border-primary bg-primary"
                           : "border-border bg-surface"
-                      }`}
+                        }`}
                     >
                       <Text
-                        className={`text-sm font-semibold ${
-                          selected ? "text-background" : "text-foreground"
-                        }`}
+                        className={`text-sm font-semibold ${selected ? "text-background" : "text-foreground"
+                          }`}
                       >
                         {item}
                       </Text>
@@ -315,16 +312,14 @@ export default function OnboardingScreen() {
                   style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
                 >
                   <View
-                    className={`rounded-2xl border px-4 py-3 ${
-                      minutes === value
+                    className={`rounded-2xl border px-4 py-3 ${minutes === value
                         ? "border-primary bg-primary"
                         : "border-border bg-surface"
-                    }`}
+                      }`}
                   >
                     <Text
-                      className={`text-sm font-bold ${
-                        minutes === value ? "text-background" : "text-foreground"
-                      }`}
+                      className={`text-sm font-bold ${minutes === value ? "text-background" : "text-foreground"
+                        }`}
                     >
                       {value}m
                     </Text>
@@ -344,16 +339,14 @@ export default function OnboardingScreen() {
                   style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
                 >
                   <View
-                    className={`h-11 w-11 items-center justify-center rounded-full border ${
-                      days.includes(day)
+                    className={`h-11 w-11 items-center justify-center rounded-full border ${days.includes(day)
                         ? "border-primary bg-primary"
                         : "border-border bg-surface"
-                    }`}
+                      }`}
                   >
                     <Text
-                      className={`text-xs font-bold ${
-                        days.includes(day) ? "text-background" : "text-foreground"
-                      }`}
+                      className={`text-xs font-bold ${days.includes(day) ? "text-background" : "text-foreground"
+                        }`}
                     >
                       {day}
                     </Text>
@@ -385,16 +378,15 @@ export default function OnboardingScreen() {
             style={({ pressed }) => [{ opacity: pressed ? 0.82 : 1 }]}
           >
             <View
-              className={`items-center rounded-2xl py-4 ${
-                canProceed() ? "bg-primary" : "bg-[#C8C8C8]"
-              }`}
+              className={`items-center rounded-2xl py-4 ${canProceed() ? "bg-primary" : "bg-[#C8C8C8]"
+                }`}
             >
               <Text className="text-sm font-bold text-background">
                 {step < 2
                   ? "Continue"
                   : scheduleUpsert.isPending
-                  ? "Setting up..."
-                  : "Let's get started"}
+                    ? "Setting up..."
+                    : "Let's get started"}
               </Text>
             </View>
           </Pressable>

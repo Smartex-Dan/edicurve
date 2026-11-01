@@ -1,19 +1,27 @@
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { startOAuthLogin } from "@/constants/oauth";
+import { useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+
+import { ConnectedApps } from "@/components/connected-apps";
+import { ScreenContainer } from "@/components/screen-container";
+import { Toast } from "@/components/toast";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { useStudyStats } from "@/hooks/use-study-stats";
-import { useOnboarding } from "@/lib/onboarding-context";
+import { useToast } from "@/hooks/use-toast";
 import { getPushToken } from "@/lib/notifications";
-import { openOAuthFlow } from "@/lib/connectors";
+import { useOnboarding } from "@/lib/onboarding-context";
+import { DAILY_TARGETS, useLocalProfile } from "@/lib/profile-store";
+import { computeExtras } from "@/lib/study-extras";
+import {
+  EXAM_HISTORY_KEY,
+  PRACTICE_HISTORY_KEY,
+  subjectColor,
+} from "@/lib/study-stats";
 import { trpc } from "@/lib/trpc";
-
-import { ScreenContainer } from "@/components/screen-container";
-import { IconSymbol } from "@/components/ui/icon-symbol";
-
-// Flip to true once Edicurve has its own sign-in.
-const SIGN_IN_ENABLED = false;
 
 function getInitials(name?: string | null): string {
   if (!name) return "";
@@ -26,196 +34,359 @@ function getInitials(name?: string | null): string {
     .join("");
 }
 
-const CONNECTORS = [
-  {
-    id: "google" as const,
-    label: "Google",
-    caption: "Calendar · Drive · Classroom",
-    icon: "person.crop.circle.fill" as const,
-    color: "#4285F4",
-  },
-  {
-    id: "notion" as const,
-    label: "Notion",
-    caption: "Notes & pages",
-    icon: "doc.text.fill" as const,
-    color: "#555555",
-  },
-];
+function SectionTitle({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <View className="mt-8">
+      <Text className="text-xl font-bold text-foreground">{title}</Text>
+      {hint ? <Text className="mt-1 text-sm text-muted">{hint}</Text> : null}
+    </View>
+  );
+}
+
+function StatTile({ value, label }: { value: string; label: string }) {
+  return (
+    <View className="flex-1 rounded-2xl border border-border bg-surface p-4">
+      <Text className="text-2xl font-bold text-foreground">{value}</Text>
+      <Text className="mt-1 text-xs text-muted">{label}</Text>
+    </View>
+  );
+}
+
+// Flip to true once Edicurve has its own sign-in.
+const SIGN_IN_ENABLED = false;
 
 export default function ProfileScreen() {
   const router = useRouter();
   const colors = useColors();
+  const { toast, showToast } = useToast();
   const { user, isAuthenticated, logout } = useAuth();
   const { data: onboarding } = useOnboarding();
-  const { stats } = useStudyStats();
+  const { stats, history, reload } = useStudyStats();
+  const { profile, update } = useLocalProfile();
   const registerToken = trpc.notifications.registerToken.useMutation();
 
-  const connectorStatus = trpc.connectors.status.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
-  const googleAuthUrl = trpc.connectors.googleAuthUrl.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
-  const notionAuthUrl = trpc.connectors.notionAuthUrl.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
-  const googleCallback = trpc.connectors.googleCallback.useMutation({
-    onSuccess: () => connectorStatus.refetch(),
-  });
-  const notionCallback = trpc.connectors.notionCallback.useMutation({
-    onSuccess: () => connectorStatus.refetch(),
-  });
-  const disconnect = trpc.connectors.disconnect.useMutation({
-    onSuccess: () => connectorStatus.refetch(),
-  });
+  const extras = useMemo(() => computeExtras(history, stats), [history, stats]);
 
-  const displayName = user?.name || "Student";
-  const initials = getInitials(user?.name);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [openBadge, setOpenBadge] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
 
-  const signIn = async () => {
-    await startOAuthLogin();
+  const displayName = profile.name || user?.name || "";
+  const initials = getInitials(displayName);
+  const version = Constants.expoConfig?.version ?? "1.0.0";
+
+  const unlockedCount = extras.achievements.filter((a) => a.unlocked).length;
+  const selectedBadge = extras.achievements.find((a) => a.id === openBadge);
+  const maxBar = Math.max(1, ...extras.week.map((day) => day.count));
+  const target = profile.dailyTarget;
+  const todayPercent = Math.min(
+    100,
+    Math.round((extras.answeredToday / target) * 100),
+  );
+  const targetMet = extras.answeredToday >= target;
+  const since = profile.createdAt
+    ? new Date(profile.createdAt).toLocaleDateString("en-GB", {
+        month: "long",
+        year: "numeric",
+      })
+    : "";
+
+  const startEditing = () => {
+    setNameDraft(profile.name);
+    setEditingName(true);
+  };
+
+  const saveName = async () => {
+    await update({ name: nameDraft });
+    setEditingName(false);
+    showToast(nameDraft.trim() ? "Name saved." : "Name cleared.");
   };
 
   const enableNotifications = async () => {
     const token = await getPushToken();
     if (!token) {
-      Alert.alert(
-        "Notifications unavailable",
-        "Enable notifications on a physical iOS or Android device.",
+      showToast(
+        "Notifications need a physical Android or iOS device.",
+        "error",
       );
       return;
     }
     if (isAuthenticated) {
       await registerToken.mutateAsync({ token, platform: "expo" });
-      Alert.alert(
-        "Reminders enabled",
-        "Edicurve can now send you study and deadline reminders.",
-      );
-    } else {
-      Alert.alert(
-        "Reminders ready on this device",
-        "Your device permission is set. Study reminders run from this device.",
-      );
     }
+    showToast("Study reminders are on for this device.");
   };
 
-  const handleConnect = async (provider: "google" | "notion") => {
-    const url =
-      provider === "google" ? googleAuthUrl.data?.url : notionAuthUrl.data?.url;
-    if (!url) return;
-
-    const code = await openOAuthFlow(
-      url,
-      provider === "google"
-        ? "/oauth/google/callback"
-        : "/oauth/notion/callback",
-    );
-    if (!code) return;
-
-    if (provider === "google") {
-      await googleCallback.mutateAsync({ code });
-    } else {
-      await notionCallback.mutateAsync({ code });
-    }
-  };
-
-  const handleDisconnect = (provider: "google" | "notion") => {
-    Alert.alert(
-      `Disconnect ${provider === "google" ? "Google" : "Notion"}?`,
-      "Edicurve will lose access to your data from this service.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Disconnect",
-          style: "destructive",
-          onPress: () => disconnect.mutate({ provider }),
-        },
-      ],
-    );
+  const resetProgress = async () => {
+    await AsyncStorage.multiRemove([PRACTICE_HISTORY_KEY, EXAM_HISTORY_KEY]);
+    await reload();
+    setConfirmReset(false);
+    setOpenBadge(null);
+    showToast("Your progress has been reset.");
   };
 
   return (
     <ScreenContainer className="px-5 pt-5" edges={["top", "left", "right"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 32 }}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled"
       >
         <Text className="text-3xl font-bold text-foreground">Profile</Text>
 
-        <View className="mt-8 items-center">
-          <View className="h-20 w-20 items-center justify-center rounded-full bg-primary">
-            {initials ? (
-              <Text className="text-2xl font-bold text-background">
-                {initials}
-              </Text>
-            ) : (
-              <IconSymbol
-                name="person.crop.circle.fill"
-                size={40}
-                color={colors.background}
-              />
-            )}
+        {/* Hero */}
+        <View className="mt-6 rounded-3xl bg-[#17382F] p-5">
+          <View className="flex-row items-center">
+            <View className="h-16 w-16 items-center justify-center rounded-full bg-primary">
+              {initials ? (
+                <Text className="text-2xl font-bold text-white">{initials}</Text>
+              ) : (
+                <IconSymbol
+                  name="person.crop.circle.fill"
+                  size={34}
+                  color="#FFFFFF"
+                />
+              )}
+            </View>
+            <View className="ml-4 flex-1">
+              {editingName ? (
+                <View>
+                  <TextInput
+                    value={nameDraft}
+                    onChangeText={setNameDraft}
+                    placeholder="Your name"
+                    placeholderTextColor="#8FB3A6"
+                    autoFocus
+                    maxLength={30}
+                    onSubmitEditing={saveName}
+                    returnKeyType="done"
+                    className="rounded-xl bg-[#244B40] px-3 py-2 text-base font-semibold text-white"
+                  />
+                  <View className="mt-2 flex-row gap-5">
+                    <Pressable onPress={saveName}>
+                      <Text className="text-xs font-bold text-[#F6D98A]">
+                        Save
+                      </Text>
+                    </Pressable>
+                    <Pressable onPress={() => setEditingName(false)}>
+                      <Text className="text-xs font-bold text-[#8FB3A6]">
+                        Cancel
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <Pressable onPress={startEditing}>
+                  <Text className="text-2xl font-bold text-white">
+                    {displayName || "Add your name"}
+                  </Text>
+                  <Text className="mt-0.5 text-xs font-semibold text-[#F6D98A]">
+                    {displayName ? "Tap to edit" : "So Edicurve can greet you"}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
           </View>
-          <Text className="mt-4 text-2xl font-bold text-foreground">
-            {displayName}
+
+          <View className="mt-5 flex-row items-center justify-between">
+            <Text className="text-sm font-bold text-white">
+              Level {extras.level.index + 1} · {extras.level.title}
+            </Text>
+            <Text className="text-xs font-semibold text-[#BFE4D5]">
+              {extras.xp} XP
+            </Text>
+          </View>
+          <View className="mt-2 h-2 overflow-hidden rounded-full bg-[#2D8D72]">
+            <View
+              className="h-full rounded-full bg-[#F6D98A]"
+              style={{ width: `${extras.level.percent}%` }}
+            />
+          </View>
+          <Text className="mt-2 text-xs text-[#BFE4D5]">
+            {extras.level.xpForNext
+              ? `${extras.level.xpForNext - extras.level.xpIntoLevel} XP to the next level`
+              : "You have reached the top level."}
           </Text>
-          <Text className="mt-1 text-sm text-muted">
-            {user?.email || "Study workspace"}
-          </Text>
+          {since ? (
+            <Text className="mt-3 text-xs text-[#8FB3A6]">
+              Studying since {since}
+            </Text>
+          ) : null}
         </View>
 
         {SIGN_IN_ENABLED && !isAuthenticated && (
-          <Pressable
-            onPress={signIn}
-            style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}
-          >
-            <View className="mt-6 flex-row items-center justify-center rounded-2xl bg-primary px-4 py-4">
-              <IconSymbol
-                name="person.crop.circle.fill"
-                size={20}
-                color={colors.background}
-              />
-              <Text className="ml-2 text-sm font-bold text-background">
-                Sign in to sync your workspace
-              </Text>
-            </View>
-          </Pressable>
+          <View className="mt-4 rounded-2xl border border-border bg-surface p-4">
+            <Text className="text-sm text-muted">
+              Sign in to sync your workspace across devices.
+            </Text>
+          </View>
         )}
 
-        <View className="mt-7 flex-row gap-3">
-          <View className="flex-1 rounded-2xl border border-border bg-surface p-4">
-            <Text className="text-2xl font-bold text-foreground">
-              {stats.streak}
-            </Text>
-            <Text className="mt-1 text-xs text-muted">Day streak</Text>
-          </View>
-          <View className="flex-1 rounded-2xl border border-border bg-surface p-4">
-            <Text className="text-2xl font-bold text-foreground">
-              {stats.weeklyPercent}%
-            </Text>
-            <Text className="mt-1 text-xs text-muted">Weekly goal</Text>
-          </View>
-          <View className="flex-1 rounded-2xl border border-border bg-surface p-4">
-            <Text className="text-2xl font-bold text-foreground">
-              {stats.totalAnswered}
-            </Text>
-            <Text className="mt-1 text-xs text-muted">Questions</Text>
-          </View>
+        {/* Stats */}
+        <View className="mt-5 flex-row gap-3">
+          <StatTile value={String(stats.streak)} label="Day streak" />
+          <StatTile
+            value={stats.accuracy === null ? "-" : `${stats.accuracy}%`}
+            label="Accuracy"
+          />
+          <StatTile value={String(stats.totalAnswered)} label="Answered" />
         </View>
 
-        <Text className="mt-8 text-xl font-bold text-foreground">
-          Your learning setup
-        </Text>
+        {/* This week */}
+        <SectionTitle title="This week" hint="Questions answered each day." />
+        <View className="mt-4 rounded-2xl border border-border bg-surface p-4">
+          <View className="h-24 flex-row items-end justify-between">
+            {extras.week.map((day, index) => {
+              const height = day.count === 0 ? 6 : 10 + (day.count / maxBar) * 70;
+              return (
+                <View
+                  key={`${day.label}-${index}`}
+                  className="flex-1 items-center justify-end"
+                >
+                  {day.count > 0 && (
+                    <Text className="mb-1 text-[10px] font-bold text-muted">
+                      {day.count}
+                    </Text>
+                  )}
+                  <View
+                    style={{
+                      width: 18,
+                      height,
+                      borderRadius: 6,
+                      backgroundColor: day.isToday
+                        ? colors.primary
+                        : day.count > 0
+                          ? `${colors.primary}66`
+                          : colors.border,
+                    }}
+                  />
+                </View>
+              );
+            })}
+          </View>
+          <View className="mt-2 flex-row justify-between">
+            {extras.week.map((day, index) => (
+              <Text
+                key={`${day.label}-label-${index}`}
+                className="flex-1 text-center text-[10px] font-semibold text-muted"
+              >
+                {day.label}
+              </Text>
+            ))}
+          </View>
+
+          <View className="mt-5 flex-row items-center justify-between">
+            <Text className="text-sm font-bold text-foreground">Today</Text>
+            <Text className="text-xs font-semibold text-muted">
+              {extras.answeredToday} of {target} questions
+            </Text>
+          </View>
+          <View className="mt-2 h-2 overflow-hidden rounded-full bg-[#E9E8E2]">
+            <View
+              className="h-full rounded-full"
+              style={{
+                width: `${todayPercent}%`,
+                backgroundColor: targetMet ? "#27AE60" : colors.primary,
+              }}
+            />
+          </View>
+          {targetMet && (
+            <Text className="mt-2 text-xs font-bold text-[#27AE60]">
+              Daily target reached. Nice work.
+            </Text>
+          )}
+        </View>
+
+        {/* Achievements */}
+        <SectionTitle
+          title="Achievements"
+          hint={`${unlockedCount} of ${extras.achievements.length} unlocked. Tap a badge for details.`}
+        />
+        <View className="mt-4 flex-row flex-wrap" style={{ gap: 12 }}>
+          {extras.achievements.map((badge) => {
+            const selected = openBadge === badge.id;
+            return (
+              <Pressable
+                key={badge.id}
+                onPress={() => setOpenBadge(selected ? null : badge.id)}
+                style={{ width: "30.5%" }}
+              >
+                <View
+                  className="items-center rounded-2xl border bg-surface px-2 py-4"
+                  style={{
+                    borderColor: selected ? colors.primary : colors.border,
+                    opacity: badge.unlocked ? 1 : 0.5,
+                  }}
+                >
+                  <View
+                    className="h-11 w-11 items-center justify-center rounded-full"
+                    style={{
+                      backgroundColor: badge.unlocked
+                        ? `${colors.primary}22`
+                        : colors.border,
+                    }}
+                  >
+                    <IconSymbol
+                      name={badge.icon}
+                      size={21}
+                      color={badge.unlocked ? colors.primary : colors.muted}
+                    />
+                  </View>
+                  <Text
+                    className="mt-2 text-center text-[11px] font-bold text-foreground"
+                    numberOfLines={2}
+                  >
+                    {badge.title}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+        {selectedBadge && (
+          <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
+            <Text className="text-sm font-bold text-foreground">
+              {selectedBadge.title}
+              {selectedBadge.unlocked ? " · Unlocked" : " · Locked"}
+            </Text>
+            <Text className="mt-1 text-xs leading-5 text-muted">
+              {selectedBadge.description}
+            </Text>
+          </View>
+        )}
+
+        {/* Learning setup */}
+        <SectionTitle title="Your learning setup" />
         <View className="mt-4 rounded-2xl border border-border bg-surface p-4">
           <Text className="text-xs font-bold text-muted">CURRENT GOAL</Text>
           <Text className="mt-2 font-semibold text-foreground">
             {onboarding.goal || "Set a goal in onboarding"}
           </Text>
+
+          {onboarding.subjects.length > 0 && (
+            <View className="mt-3 flex-row flex-wrap gap-2">
+              {onboarding.subjects.map((subject) => {
+                const color = subjectColor(subject);
+                return (
+                  <View
+                    key={subject}
+                    className="rounded-full px-3 py-1.5"
+                    style={{ backgroundColor: `${color}19` }}
+                  >
+                    <Text className="text-xs font-bold" style={{ color }}>
+                      {subject}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
           <Text className="mt-3 text-xs leading-5 text-muted">
-            {onboarding.minutesPerDay} min ·{" "}
-            {onboarding.studyDays.join(", ") || "your chosen days"} ·{" "}
-            {onboarding.subjects.join(", ") || "No subjects yet"}
+            {onboarding.minutesPerDay} min on{" "}
+            {onboarding.studyDays.join(", ") || "your chosen days"}
           </Text>
           <Pressable
             onPress={() => router.push("/onboarding" as never)}
@@ -227,20 +398,15 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        <Text className="mt-8 text-xl font-bold text-foreground">
-          Study tools
-        </Text>
+        {/* Study tools */}
+        <SectionTitle title="Study tools" />
         <View className="mt-4 overflow-hidden rounded-2xl border border-border bg-surface">
           <Pressable
             onPress={() => router.push("/analytics" as never)}
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
           >
             <View className="flex-row items-center border-b border-border p-4">
-              <IconSymbol
-                name="chart.bar.fill"
-                size={20}
-                color={colors.muted}
-              />
+              <IconSymbol name="chart.bar.fill" size={20} color={colors.muted} />
               <Text className="ml-3 flex-1 font-semibold text-foreground">
                 Analytics
               </Text>
@@ -274,87 +440,58 @@ export default function ProfileScreen() {
               <Text className="ml-3 flex-1 font-semibold text-foreground">
                 Planner
               </Text>
-              <Text className="mr-1 text-xs text-muted">
-                Tasks & reminders
-              </Text>
+              <Text className="mr-1 text-xs text-muted">Tasks & reminders</Text>
               <IconSymbol name="chevron.right" size={18} color={colors.muted} />
             </View>
           </Pressable>
         </View>
 
-        {isAuthenticated && (
-          <>
-            <Text className="mt-8 text-xl font-bold text-foreground">
-              Connected apps
-            </Text>
-            <Text className="mt-1 text-sm text-muted">
-              Let EDI see your calendar, files, and notes to give smarter help.
-            </Text>
-            <View className="mt-4 overflow-hidden rounded-2xl border border-border bg-surface">
-              {CONNECTORS.map((connector, index) => {
-                const connected = connectorStatus.data?.[connector.id] ?? false;
-                const isLast = index === CONNECTORS.length - 1;
-                return (
-                  <View
-                    key={connector.id}
-                    className={`flex-row items-center p-4 ${
-                      !isLast ? "border-b border-border" : ""
-                    }`}
-                  >
-                    <View
-                      className="h-10 w-10 items-center justify-center rounded-xl"
-                      style={{ backgroundColor: `${connector.color}18` }}
-                    >
-                      <IconSymbol
-                        name={connector.icon}
-                        size={20}
-                        color={connector.color}
-                      />
-                    </View>
-                    <View className="ml-3 flex-1">
-                      <Text className="font-bold text-foreground">
-                        {connector.label}
-                      </Text>
-                      <Text className="mt-0.5 text-xs text-muted">
-                        {connector.caption}
-                      </Text>
-                    </View>
-                    <Pressable
-                      onPress={() =>
-                        connected
-                          ? handleDisconnect(connector.id)
-                          : handleConnect(connector.id)
-                      }
-                      disabled={disconnect.isPending}
-                      style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
-                    >
-                      <View
-                        className={`rounded-full px-3 py-1.5 ${
-                          connected
-                            ? "border border-border bg-surface"
-                            : "bg-primary"
-                        }`}
-                      >
-                        <Text
-                          className={`text-xs font-bold ${
-                            connected ? "text-muted" : "text-background"
-                          }`}
-                        >
-                          {connected ? "Disconnect" : "Connect"}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </View>
-          </>
-        )}
+        {isAuthenticated && <ConnectedApps />}
 
-        <Text className="mt-8 text-xl font-bold text-foreground">
-          Preferences
-        </Text>
-        <View className="mt-4 overflow-hidden rounded-2xl border border-border bg-surface">
+        {/* Settings */}
+        <SectionTitle title="Settings" />
+        <View className="mt-4 rounded-2xl border border-border bg-surface p-4">
+          <Text className="text-sm font-bold text-foreground">
+            Daily question target
+          </Text>
+          <Text className="mt-1 text-xs text-muted">
+            How many questions you want to answer each day.
+          </Text>
+          <View className="mt-3 flex-row gap-2">
+            {DAILY_TARGETS.map((value) => {
+              const selected = target === value;
+              return (
+                <Pressable
+                  key={value}
+                  onPress={() => {
+                    update({ dailyTarget: value });
+                    showToast(`Daily target set to ${value} questions.`);
+                  }}
+                  style={{ flex: 1 }}
+                >
+                  <View
+                    className="items-center rounded-xl border py-2.5"
+                    style={{
+                      backgroundColor: selected ? colors.primary : colors.background,
+                      borderColor: selected ? colors.primary : colors.border,
+                    }}
+                  >
+                    <Text
+                      className="text-sm font-bold"
+                      style={{
+                        color: selected ? colors.background : colors.foreground,
+                      }}
+                    >
+                      {value}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View className="mt-3 overflow-hidden rounded-2xl border border-border bg-surface">
           <Pressable
             onPress={enableNotifications}
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
@@ -362,15 +499,13 @@ export default function ProfileScreen() {
             <View className="flex-row items-center border-b border-border p-4">
               <IconSymbol name="bell.fill" size={20} color={colors.muted} />
               <Text className="ml-3 flex-1 font-semibold text-foreground">
-                Notifications
+                Study reminders
               </Text>
               <Text className="text-xs font-bold text-primary">Enable</Text>
             </View>
           </Pressable>
           <Pressable
-            onPress={() =>
-              Alert.alert("Appearance", "Edicurve follows your device theme.")
-            }
+            onPress={() => showToast("Edicurve follows your device theme.")}
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
           >
             <View className="flex-row items-center border-b border-border p-4">
@@ -382,23 +517,60 @@ export default function ProfileScreen() {
             </View>
           </Pressable>
           <Pressable
-            onPress={() =>
-              Alert.alert("About Edicurve", "Learn, Practice, Progress.")
-            }
+            onPress={() => setShowAbout((value) => !value)}
             style={({ pressed }) => [{ opacity: pressed ? 0.72 : 1 }]}
           >
             <View className="flex-row items-center p-4">
-              <IconSymbol
-                name="info.circle.fill"
-                size={20}
-                color={colors.muted}
-              />
+              <IconSymbol name="info.circle.fill" size={20} color={colors.muted} />
               <Text className="ml-3 flex-1 font-semibold text-foreground">
                 About Edicurve
               </Text>
-              <IconSymbol name="chevron.right" size={18} color={colors.muted} />
+              <Text className="text-xs text-muted">v{version}</Text>
             </View>
           </Pressable>
+          {showAbout && (
+            <View className="border-t border-border px-4 pb-4 pt-3">
+              <Text className="text-sm font-bold text-foreground">
+                Learn, Practice, Progress.
+              </Text>
+              <Text className="mt-1 text-xs leading-5 text-muted">
+                Edicurve helps you revise with past-style questions, timed mock
+                exams and an AI study companion called EDI. Your progress is
+                saved on this device.
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Danger zone */}
+        <View className="mt-3 rounded-2xl border border-border bg-surface p-4">
+          {confirmReset ? (
+            <View>
+              <Text className="text-sm font-bold text-foreground">
+                Reset all progress?
+              </Text>
+              <Text className="mt-1 text-xs leading-5 text-muted">
+                This clears your practice and exam history, streak, level and
+                badges. Notes, PDFs and planner tasks are kept.
+              </Text>
+              <View className="mt-3 flex-row gap-5">
+                <Pressable onPress={resetProgress}>
+                  <Text className="text-sm font-bold text-error">
+                    Yes, reset
+                  </Text>
+                </Pressable>
+                <Pressable onPress={() => setConfirmReset(false)}>
+                  <Text className="text-sm font-bold text-muted">Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Pressable onPress={() => setConfirmReset(true)}>
+              <Text className="text-sm font-semibold text-error">
+                Reset my progress
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         {isAuthenticated && (
@@ -412,6 +584,7 @@ export default function ProfileScreen() {
           </Pressable>
         )}
       </ScrollView>
+      <Toast toast={toast} />
     </ScreenContainer>
   );
 }

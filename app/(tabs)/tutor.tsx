@@ -1,5 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -10,23 +10,28 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useColors } from "@/hooks/use-colors";
-import { trpc } from "@/lib/trpc";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useColors } from "@/hooks/use-colors";
+import {
+  ActiveDocument,
+  clearActiveDocument,
+  getActiveDocument,
+} from "@/lib/library-storage";
+import { trpc } from "@/lib/trpc";
 
 type Message = { id: string; role: "user" | "assistant"; content: string };
-type ActiveDocument = { name: string; key: string; mimeType: string };
 
 const starterMessages: Message[] = [
   {
     id: "welcome",
     role: "assistant",
     content:
-      "Hi, I'm Edi — your AI study companion. Ask me anything: concepts, past paper help, practice questions, or study plans. What are you working on?",
+      "Hi, I'm EDI, your AI study companion. Ask me anything: concepts, past paper help, practice questions, or study plans. What are you working on?",
   },
 ];
+
 const prompts = [
   "Explain a concept",
   "Quiz me on a topic",
@@ -38,15 +43,22 @@ export default function TutorScreen() {
   const colors = useColors();
   const [messages, setMessages] = useState<Message[]>(starterMessages);
   const [draft, setDraft] = useState("");
-  const [document, setDocument] = useState<ActiveDocument | undefined>();
+  const [document, setDocument] = useState<ActiveDocument | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const chat = trpc.tutor.chat.useMutation();
 
-  useEffect(() => {
-    AsyncStorage.getItem("edicurve-active-document").then((value) => {
-      if (value) setDocument(JSON.parse(value));
-    });
-  }, []);
+  // Reload the chosen PDF whenever this tab comes into view.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      getActiveDocument().then((doc) => {
+        if (active) setDocument(doc);
+      });
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
 
   useEffect(() => {
     requestAnimationFrame(() =>
@@ -65,7 +77,9 @@ export default function TutorScreen() {
     setDraft("");
     try {
       const response = await chat.mutateAsync({
-        document,
+        document: document
+          ? { name: document.name, text: document.text }
+          : undefined,
         messages: nextMessages.map(({ role, content: text }) => ({
           role,
           content: text,
@@ -92,9 +106,9 @@ export default function TutorScreen() {
     }
   };
 
-  const clearDocument = async () => {
-    await AsyncStorage.removeItem("edicurve-active-document");
-    setDocument(undefined);
+  const removeDocument = async () => {
+    await clearActiveDocument();
+    setDocument(null);
   };
 
   return (
@@ -107,7 +121,6 @@ export default function TutorScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={90}
       >
-        {/* Header */}
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center">
             <View className="h-11 w-11 items-center justify-center rounded-2xl bg-primary">
@@ -115,10 +128,10 @@ export default function TutorScreen() {
             </View>
             <View className="ml-3">
               <Text className="text-sm font-semibold text-primary">
-                YOUR STUDY COMPANION
+                YOUR AI COMPANION
               </Text>
               <Text className="mt-0.5 text-2xl font-bold text-foreground">
-                Edi
+                EDI
               </Text>
             </View>
           </View>
@@ -129,11 +142,10 @@ export default function TutorScreen() {
         </View>
 
         <Text className="mt-3 text-sm leading-5 text-muted">
-          Explanations, practice questions, past papers, and study plans — all
-          in one place.
+          Explanations, practice questions, past papers, and study plans, all in
+          one place.
         </Text>
 
-        {/* Active PDF banner */}
         {document && (
           <View className="mt-4 flex-row items-center rounded-2xl border border-primary bg-[#EAF5F0] px-3 py-3">
             <IconSymbol name="doc.text.fill" size={18} color={colors.primary} />
@@ -141,15 +153,12 @@ export default function TutorScreen() {
               <Text className="text-xs font-bold text-primary">
                 PDF context active
               </Text>
-              <Text
-                className="mt-0.5 text-xs text-foreground"
-                numberOfLines={1}
-              >
+              <Text className="mt-0.5 text-xs text-foreground" numberOfLines={1}>
                 {document.name}
               </Text>
             </View>
             <Pressable
-              onPress={clearDocument}
+              onPress={removeDocument}
               style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}
             >
               <Text className="text-xs font-bold text-muted">Remove</Text>
@@ -157,7 +166,6 @@ export default function TutorScreen() {
           </View>
         )}
 
-        {/* Messages */}
         <ScrollView
           ref={scrollRef}
           className="mt-5 flex-1"
@@ -176,9 +184,7 @@ export default function TutorScreen() {
             >
               <Text
                 className={`text-sm leading-5 ${
-                  message.role === "user"
-                    ? "text-background"
-                    : "text-foreground"
+                  message.role === "user" ? "text-background" : "text-foreground"
                 }`}
               >
                 {message.content}
@@ -192,7 +198,6 @@ export default function TutorScreen() {
           )}
         </ScrollView>
 
-        {/* Prompt chips */}
         {messages.length === 1 && (
           <ScrollView
             horizontal
@@ -200,9 +205,6 @@ export default function TutorScreen() {
             className="mb-3"
             contentContainerStyle={{ gap: 8 }}
           >
-            <Text className="mr-1 py-2 text-xs font-semibold text-muted">
-              Try:
-            </Text>
             {prompts.map((prompt) => (
               <Pressable
                 key={prompt}
@@ -219,13 +221,12 @@ export default function TutorScreen() {
           </ScrollView>
         )}
 
-        {/* Input */}
         <View className="flex-row items-end rounded-2xl border border-border bg-surface px-3 py-2">
           <TextInput
             value={draft}
             onChangeText={setDraft}
             placeholder={
-              document ? "Ask about this PDF..." : "Ask Edi anything..."
+              document ? "Ask about this PDF..." : "Ask EDI anything..."
             }
             placeholderTextColor={colors.muted}
             multiline
@@ -237,9 +238,7 @@ export default function TutorScreen() {
           <Pressable
             onPress={() => sendMessage()}
             style={({ pressed }) => [
-              {
-                opacity: pressed ? 0.65 : draft.trim() ? 1 : 0.35,
-              },
+              { opacity: pressed ? 0.65 : draft.trim() ? 1 : 0.35 },
             ]}
             disabled={!draft.trim() || chat.isPending}
           >
